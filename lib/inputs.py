@@ -4,8 +4,7 @@ import ccxt
 import time
 from datetime import datetime
 from config import config
-from mmlib  import indicators
-from mmlib import util
+from lib import util
 import numpy as np
 
 #import statistics 
@@ -43,7 +42,7 @@ class BasicInputs: # General inputs
 
 		for timeFrame in config.timeFrames :
 			self.candles[timeFrame] = self.getOhclv(timeFrame)
-			self.hlc3[timeFrame] = util.klineToData(self.candles[timeFrame])
+			self.hlc3[timeFrame] = util.klineToHlc3(self.candles[timeFrame])
 
 
 	def getMarketStructure(self):
@@ -106,7 +105,6 @@ class Inputs(BasicInputs): # Specialiszed child class of Inputs
 		self.bestAsk = float(self.orderBook['asks'][0][0])
 		self.bestBid = float(self.orderBook['bids'][0][0])
 		self.midPrice = (self.bestAsk + self.bestBid) / 2
-		self.skewedMidPrice = self.getMeanLobPrice(config.lobDepth)
 
 		# Trades/history analysis (past 500 trades - will make this time-limit based later):
 		self.tradesAnalysis = self.analyzeTrades()
