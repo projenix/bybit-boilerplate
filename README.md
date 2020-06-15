@@ -10,3 +10,5 @@ Enjoy.
 
 ## Dependencies:
 * CCXT
+
+PS: You will need a Bybit exchange account and APi keys. If you don't have already, feel free to use my affiliate link: https://www.bybit.com/app/register?ref=E0p44
