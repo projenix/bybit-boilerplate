@@ -1,5 +1,6 @@
 
-import ccxt
+import asyncio
+import ccxt.async_support as ccxt
 
 import time
 from datetime import datetime
@@ -12,46 +13,55 @@ import numpy as np
 #import math
 
 
-class BasicInputs: # General inputs
+class BasicInputs:
 	def __init__(self, exchange, market):
 		self.market = market
 		self.baseCurrency = self.market.split('/')[0]
 		self.quoteCurrency = self.market.split('/')[1]
-		self.exchange = exchange 
-		self.exchange.load_markets ()
-		self.marketStructure = self.getMarketStructure()
+		self.exchange = exchange
+		self.candles = dict()
+		self.hlc3 = dict()
+		asyncio.get_event_loop().run_until_complete(self.pullData()) # All the I/O is done here - This is a blocking call that waits for all the non-blocking async loading to finish before we continue.
 
-		self.balances = self.getBalances()
-
+		# Data processing:
 		self.freeBalance = self.getFreeBalance()
 		self.usedBalance = self.getUsedBalance()
 		self.totalBalance = self.getTotalBalance()
-
 		self.realizedPnl = self.balances['info']['result'][self.baseCurrency]['realised_pnl']
 		self.unrealizedPnl = self.balances['info']['result'][self.baseCurrency]['unrealised_pnl']
-
 		self.amountPrecision = self.marketStructure['precision']['amount']
 		self.pricePrecision = self.marketStructure['precision']['price'] 
-	
-		self.candles = dict()
-		self.hlc3 = dict()
-		self.trades = self.getTrades()
 		self.lastPrice = self.trades[-1]['price']
 		self.meanCost = self.lastPrice * (1 + (self.unrealizedPnl/100))
-		self.orderBook = self.getOrderBook()
+		self.bestAsk = float(self.orderBook['asks'][0][0])
+		self.bestBid = float(self.orderBook['bids'][0][0])
+		self.midPrice = (self.bestAsk + self.bestBid) / 2
+
+		
+	async def pullData(self): # This pulls the data asynchronously from the exchange
+		await self.exchange.load_markets()
+		self.marketStructure = await self.getMarketStructure()
+		self.balances = await self.getBalances()
+		self.orders = await self.exchange.fetch_orders()
+		self.trades = await self.getTrades()
+		
 
 		for timeFrame in config.timeFrames :
-			self.candles[timeFrame] = self.getOhclv(timeFrame)
-			self.hlc3[timeFrame] = util.klineToHlc3(self.candles[timeFrame])
+			self.candles[timeFrame] = await self.getOhclv(timeFrame)
+
+		# Comment this out if you don't need it:
+		self.orderBook = await self.getOrderBook()
+		await self.exchange.close()
 
 
-	def getMarketStructure(self):
-		self.exchange.load_markets ()
+
+	async def getMarketStructure(self):
+		await self.exchange.load_markets()
 		marketStructure = self.exchange.markets[self.market]
 		return marketStructure
 
-	def getBalances (self):
-		return self.exchange.fetchBalance (params = {})
+	async def getBalances (self):
+		return await self.exchange.fetchBalance (params = {})
 
 	# Current asset balances:
 	def getFreeBalance(self): # This is for all balances, not just current asset (useful for portfolio balancing)
@@ -83,15 +93,17 @@ class BasicInputs: # General inputs
 			balance[key] = self.balances['total'][key]
 		return balance
 
-	def getOhclv(self, timeFrame):
-		return self.exchange.fetch_ohlcv (self.market, timeFrame, limit=200)
+	async def getOhclv(self, timeFrame):
+		return await self.exchange.fetch_ohlcv (self.market, timeFrame, limit=200)
 
-	def getOrderBook(self):
-		return self.exchange.fetch_order_book (self.market) 
+	async def getOrderBook(self):
+		return await self.exchange.fetch_order_book (self.market) 
 
-	def getTrades(self):
-		return self.exchange.fetch_trades (self.market)
+	async def getTrades(self):
+		# async fetchTrades (symbol, since = undefined, limit = undefined, params = {})
+		return await self.exchange.fetch_trades (self.market)
 		
+
 
 
 ##############################################################################

@@ -1,8 +1,13 @@
-import ccxt
-#import sys, getopt, time
-#from datetime import datetime
+#!/usr/bin/env python3
 
+import ccxt.async_support as ccxt
+import asyncio
+
+import sys, getopt, time
+from datetime import datetime
 from lib import inputs
+from lib import indicators
+from lib import util
 from config import config
 
 
@@ -24,29 +29,21 @@ exchange = exchange_class({
 	})
 
 
-inputs = inputs.Inputs(exchange, market) 
+inputs = inputs.Inputs(exchange, market)
 
 
-print('last price')
-print(inputs.lastPrice)
 
-print('meanCost')
-print(inputs.meanCost)
 
-print('Trades analysis:')
-print(inputs.tradesAnalysis)
+print('last price: {0}'.format(inputs.lastPrice))
 
-print('used')
-print(inputs.usedBalance)
 
-print('total')
-print(inputs.totalBalance)
+print('Total balance: {0}'. format(inputs.totalBalance))
 
-print('realizedPnl')
-print(inputs.realizedPnl)
 
-print('unrealizedPnl')
-print(inputs.unrealizedPnl)
+print('Trades analysis: {0}'.format(inputs.tradesAnalysis))
+
+
+
 
 
 
