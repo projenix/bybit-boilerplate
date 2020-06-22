@@ -42,6 +42,11 @@ print('Total balance: {0}'. format(inputs.totalBalance))
 
 print('Trades analysis: {0}'.format(inputs.tradesAnalysis))
 
+print('TrueCandles:')
+
+print(inputs.trueCandles)
+
+
 
 
 

@@ -6,11 +6,12 @@ import time
 from datetime import datetime
 from config import config
 from lib import util
+from lib  import indicators
 import numpy as np
 
 #import statistics 
 #import statsmodels
-#import math
+import math
 
 
 class BasicInputs:
@@ -112,22 +113,24 @@ class BasicInputs:
 class Inputs(BasicInputs): # Specialiszed child class of Inputs
 	def __init__(self, exchange, market):
 		BasicInputs.__init__(self, exchange, market)
+		
 		# Todo: add more features here.
-		#self.orderBook = self.getOrderBook()
-		self.bestAsk = float(self.orderBook['asks'][0][0])
-		self.bestBid = float(self.orderBook['bids'][0][0])
-		self.midPrice = (self.bestAsk + self.bestBid) / 2
 
-		# Trades/history analysis (past 500 trades - will make this time-limit based later):
+		
+		self.skewedMidPrice = self.getMeanLobPrice(config.lobDepth)
+
+		# Trades/history analysis (past 500 trades - will make this time limit based later):
 		self.tradesAnalysis = self.analyzeTrades()
 		self.buyVolume = self.tradesAnalysis['buyVolume']
 		self.meanBuyPrice = self.tradesAnalysis['meanBuyCost']
 		self.sellVolume = self.tradesAnalysis['sellVolume']
 		self.meanSellPrice = self.tradesAnalysis['meanSellCost']
 
-		################################################
-		# ADD your TA and feature calculation code here.
-		################################################
+		
+		#self.vwap = indicators.vwap(self.candles['1m'][-config.vwmaLength:-1]) # Using n last elements
+		self.fastVwap = indicators.vwap(self.candles['1m'][-config.fastVwapLength:-1]) # Same
+
+		self.trueCandles = self.getTrueCandles(self.trades, 10) # <<<<<<<<<<<<<<<<<
 		
 	def analyzeTrades(self):
 		analysis = dict()
@@ -162,4 +165,134 @@ class Inputs(BasicInputs): # Specialiszed child class of Inputs
 		analysis['meanSellCost'] = totalSellCost / analysis['sellVolume']
 
 		return analysis
+
+	#######################################################################################################
+
+	# True Candle generation - These are candles that have two additional fields for buy Volume and sell Volume + a period vwap instead of "close", they are backward compatible with regular candles in every way (drop-in replacement).
+	def getTrueCandles(self, trades, length=10): # Candle length in seconds - Default is 10s
+		tradeCount = len(trades) # This is currently always 500 in Bybit but we don't want to take it for granted in case it changes.
+		trueCandles = []
+		trades = np.array(trades)
+		startTime = int(trades[0]['timestamp']/1000)
+		endTime = int(trades[-1]['timestamp']/1000)
+		candleCount = int((endTime - startTime) / length) 
+		position = 0 # moving pointer/cursor
+
+		#print('start time {0}'.format(startTime))
+		#print('end of first candle {0}'.format(startTime+length))
+
+
+
+		for i in range(0, candleCount):
+			buyVolume = 0
+			sellVolume = 0
+
+			buyVwapTotal = 0
+			buyCount = 0
+			buyVwap = 0
+
+			sellVwapTotal = 0
+			sellCount = 0
+			sellVwap = 0
+
+			vwapTotal = 0
+			vwap = 0
+
+			count = 0
+
+			high = trades[position]['price']
+			low = trades[position]['price']
+			openPrice = trades[position]['price']
+
+			#print('passe {0}'.format(i))
+
+			for trade in trades[position : -1]: # We are not iterating naively, there is a condition and a break statement below.
+				ts = int(trade['timestamp']/1000)
+				#print(ts)
+
+				if ts >= startTime + (i * length) and ts < startTime + ((i+1) * length): # We are within a candle/window
+					if trade['price'] > high:
+						high = trade['price']
+					if trade['price'] < low:
+						low = trade['price']
+
+					if trade['side'] == 'buy':
+						buyVolume += trade['amount']
+						buyVwapTotal += trade['amount'] * trade['price']
+						vwapTotal += buyVolume * trade['price']
+						buyCount += 1
+						position += 1
+			
+					elif trade['side'] == 'sell':
+						sellVolume += trade['amount']
+						sellVwapTotal += trade['amount'] * trade['price']
+						vwapTotal += sellVolume * trade['price']
+						sellCount += 1
+						position += 1
+				else:
+					#print('position {0}'.format(position))
+					break # We exceeded the boundary of the current TrueCandle
+
+			volume = buyVolume + sellVolume
+			if buyVolume >0:
+				buyVwap = round(buyVwapTotal / buyVolume , 2)
+			if sellVolume>0:
+				sellVwap = round(sellVwapTotal / sellVolume , 2)
+			if volume >0:
+				vwap = round((buyVwapTotal + sellVwapTotal) / (volume) , 2)
+
+			# Contructing the TrueCandle:
+			trueCandle = []
+			trueCandle.append(startTime + (i * length)) # Timestamp
+			trueCandle.append(openPrice) # Open 
+			trueCandle.append(high) # High
+			trueCandle.append(low) # Low
+			trueCandle.append(vwap) # We intentionally use the VWAP here instead of the classic "close" (as opposed to creating a new slot for it).
+			trueCandle.append(volume) # Volume
+			# The new fields now:
+			trueCandle.append(buyVolume) # NB: All volumes are dollar amounts
+			trueCandle.append(sellVolume)
+			trueCandle.append(buyVwap)
+			trueCandle.append(sellVwap)
+
+			trueCandles.append(trueCandle) # Appending to main list
+
+		return trueCandles
+
+	#######################################################################################################
+
+
+
+	def getMeanLobPrice(self, depth):
+		# Asks:
+		totalAsks = 0
+		askVolume = 0.0000001 # Avoiding division by zero.
+
+		for ask in self.orderBook["asks"] :
+			if float(ask[0]) < self.bestAsk * (1 + depth):
+				totalAsks += float(ask[0])*float(ask[1])
+				askVolume += float(ask[1])
+
+		averageAsk = totalAsks/askVolume
+
+		# Bids:
+		totalBids = 0
+		bidVolume = 0.0000001 # Avoiding division by zero.
+
+		for bid in self.orderBook["bids"] :
+			if float(bid[0]) > self.bestAsk * (1 - depth):
+				totalBids += float(bid[0]) * float(bid[1])
+				bidVolume += float(bid[1])
+
+		averageBid = totalBids/bidVolume
+
+		#meanPrice = (averageAsk + averageBid) /2
+		#print("Natural/Naive mean price: " + str(meanPrice))
+
+		#skewedMeanPrice = ((averageAsk * bidVolume) + averageBid * askVolume) / (askVolume + bidVolume) 
+		#print("Natural mean price:  " + str(skewedMeanPrice))
+
+		skewedMeanPrice = ((averageAsk * math.log(1+bidVolume)) + (averageBid * math.log(1+askVolume))) / (math.log(1+askVolume) + math.log(1+bidVolume))
+
+		return skewedMeanPrice
 
